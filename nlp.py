@@ -21,8 +21,12 @@ import matplotlib.cm as cm  # Colour map
 default_stopwords = stopwords.words('english')
 
 default_stopwords.extend(
-    list(string.punctuation) + ['would', 'could', 'get',
-                                'want', 'he', 'twitter']
+    list(string.punctuation) + [
+        'would', 'could', 'get', 'want', 'he', 'twitter', 'elon', 'musk', 
+        'well', 'need', 'come', 'really', 'take', 'say', 'go', 'use', 'make',
+        'know', 'think'
+
+    ]
 )
 
 default_tokeniser = TweetTokenizer()
@@ -83,6 +87,8 @@ def furnish(
         # Tag word as verb, nouns, etc, improves lemmatiser accuracy
         tag = tag.lower()[0]
         tag = tag if tag in ['a', 'r', 'n', 'v'] else None
+        if not word.isalpha():
+            continue
         if tag:
             word = lemmatiser.lemmatize(word, tag)
         else:
@@ -100,18 +106,6 @@ def gen_n_grams(
         nltk.everygrams(x.split(' '), min_len=min_len, max_len=max_len))
     )
     return df
-
-
-def get_topic_words(
-        df: pd.DataFrame,
-        col: str,
-        vectoriser,
-        decomposer,
-):
-    term_matrix = vectoriser.fit_transform(df[col].values.astype('U'))
-
-    decomposer.fit(term_matrix)
-    return vectoriser, decomposer, term_matrix
 
 
 def print_topic_words(decomposer, vectoriser, n_words):
@@ -173,6 +167,7 @@ def plot_clusters(data, labels):
     ax[0].set_title("PCA Clusters")
     ax[1].scatter(pca[idx, 0], tsne[idx, 1], c=label_subset)
     ax[1].set_title("TSNE Clusters")
+
 
 
 """
