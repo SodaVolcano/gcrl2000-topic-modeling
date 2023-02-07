@@ -82,7 +82,8 @@ def preprocess_df(
         remove_mentions: bool = True,
         remove_hashtags: bool = True,
         remove_urls: bool = True,
-        casing: Literal["lower", "upper", None] = 'lower'
+        casing: Literal["lower", "upper", None] = 'lower',
+        inplace=False
 ) -> pd.DataFrame:
     """
     Conduct text preprocessing on a DataFrame's column, e.g. remove stop words
@@ -109,12 +110,12 @@ def preprocess_df(
 
     :return: DataFrame containing the preprocessed texts
     """
+    if not inplace:
+        df = df.copy()
+    
     filter_regex = _build_regex(
         filter_regex, remove_mentions, remove_hashtags, remove_urls
     )
-
-    if remove_punct:
-        stop_words.extend(string.punctuation)
 
     # Empty function, don't change casing
     def casing_func(x):
@@ -136,7 +137,7 @@ def preprocess_df(
         )
 
     df[txt_col] = df[txt_col].apply(
-        furnish, args=(tokeniser, lemmatiser, stop_words)
+        furnish, args=(remove_punct, tokeniser, lemmatiser, stop_words)
     )
 
     return df
@@ -144,6 +145,7 @@ def preprocess_df(
 
 def furnish(
         text: str,
+        remove_punct: bool,
         tokeniser=WhitespaceTokenizer(),
         lemmatiser=WordNetLemmatizer(),
         stop_words: list[str] = stopwords.words('english')
@@ -167,7 +169,7 @@ def furnish(
         else:
             word = lemmatiser.lemmatize(word)
 
-        if word not in stop_words:
+        if word not in stop_words and (remove_punct and word.isalnum()):
             final_text.append(word)
 
     return ' '.join(final_text)
@@ -223,99 +225,12 @@ def load_twitter_csv(
     return df
 
 
-# ====================== Text Vectorisation ============================
-
-
-def _get_vectoriser(vectoriser: str, corpus: Iterable, vect_args: dict):
-    """
-    Preset function to match vectoriser name to appropriate sklearn class
-
-    The `sklearn` `vectoriser` object is initialised with given `vect_args`
-    as keyword arguments. The `vectoriser` is then fitted to the `corpus`
-    and used to transform `corpus` into a term matrix.
-    :return: `sklearn` vectoriser and term matrix transformed from input corpus
-    """
-    match vectoriser:
-        case "bow":
-            vectoriser = CountVectorizer(**vect_args)
-        case "tfidf":
-            vectoriser = TfidfVectorizer(**vect_args)
-        case "hash":
-            vectoriser = HashingVectorizer(**vect_args)
-        case _:
-            raise ValueError(
-                f"Vectoriser name {vectoriser} not found in sklearn, available"
-                "vectorisers: \"bow\", \"tfidf\", \"hash\""
-            )
-
-    term_matrix = vectoriser.fit_transform(corpus)
-    return vectoriser, term_matrix
-
-
-def vectorise_text(
-        corpus: Iterable,
-        vectoriser: Literal['bow', 'tfidf'] | Any = 'bow',
-        **vect_kwargs
-):
-    """
-    Vectorise given corpus into term matrix with shape (n_documents, n_terms)
-
-    Vectorisation is the process of converting textual data to numeric
-    vectors (lists) for further processing. A document (text) can be
-    represented as a vector of numbers, where the numbers represent a unique
-    term in the vocabulary.
-
-    **Bag-of-words** (Bow) is a vectorisation technique where each word is
-    represented as the number of times they occurred in a document. For
-    example, given the following corpus (list of documents) with 2 documents:
-        corpus = ["dogs and cats are antagonistic",
-                  "cats and cats are friends"]
-    We construct a vocabulary - which is a list of all unique terms in the
-    corpus.
-        vocab = ["dogs", "and", "cats", "are", "antagonistic", "friendds"]
-    Then, BoW will represent the two documents as 2 vectors of term frequency
-    where the i-th element in each document represent number of times that the
-    i-th term in vocabulary occurred in that document.
-        bow_matrix = [[1, 1, 1, 1, 1, 0],
-                      [0, 1, 2, 1, 0, 1]]
-
-    TF-IDF represent each term as a weight that indicate how important that
-    term is in the corpus. This is calculated as the product of its **term
-    frequency** (TF) and **inverse document frequency** (IDF).
-        - TF = (n_freq of term t in document d) /
-               (sum of all frequency of all terms in d)
-        - IDF = log((n_documents in corpus) /
-                    (n_documents that contains t))
-
-    :param corpus: List of texts (documents) to vectorise
-    :param vectoriser: Str indicating what vectoriser to use. "bow" = Bag of
-        Words, "TF-IDF" = Term Frequency-Inverse Document Frequency. User
-        can also pass in their own vectoriser instead of using preset settings.
-    :param library: Str indicating what Python module to chose vectoriser from,
-        i.e. from sklearn or gensim.
-    :param vect_kwargs: Additional keyword arguments to pass to the vectoriser
-    :return: Vectoriser fitted to the corpus and the resulting term matrix.
-    """
-    if vectoriser is None:
-        raise ValueError("Parameter 'vectoriser' cannot be None!")
-
-    doc_term_matrix = None
-    if type(vectoriser) is not str:
-        doc_term_matrix = vectoriser.fit_transform(corpus)
-    else:
-        vectoriser, doc_term_matrix = \
-            _get_vectoriser(vectoriser, corpus, vect_kwargs)
-
-    # incase pyLDAvis is used, which calls get_feature_names without _out
-    vectoriser.get_feature_names = vectoriser.get_feature_names_out
-    return vectoriser, doc_term_matrix
-
-
 # ========================= Visualisation =============================
 
 def plot_document_matrix(
         doc_matrix,
         decomposer: Literal["pca", "tsne"] | Any = "pca",
+        perplexity: float = 30.0,
         dimension: Literal[2, 3] = 2,
         n_samples: int = 3000
 ) -> None:
@@ -330,6 +245,7 @@ def plot_document_matrix(
         matrix
     :param decomposer: Str indicating which dimensionality reduction technique
         to use. Pass in non-string to specify own decomposer. "pca" by default
+    :param perplexity: Hyperparameter used for t-SNE, ignored if using PCA
     :param dimension: Number of dimension in the resulting plot, i.e. 2D or 3D
     :param n_samples: Number of points from term matrix to plot
     """
@@ -361,7 +277,7 @@ def plot_document_matrix(
             doc_matrix = PCA(n_components=50).fit_transform(doc_matrix)
         transformed = TSNE(
             n_components=dimension, init='pca', verbose=1,
-            early_exaggeration=50, perplexity=50
+            early_exaggeration=50, perplexity=perplexity
         ).fit_transform(doc_matrix)
     else:
         transformed = decomposer.fit_transform(doc_matrix)
@@ -387,45 +303,12 @@ def plot_document_matrix(
     )
 
 
-# ======================== Topic Modelling =============================
-
-def _get_topic_models(model: str, n_topics: int, model_args: dict):
-    match model:
-        case 'lda':
-            return LatentDirichletAllocation(
-                n_components=n_topics, **model_args
-            )
-        case 'nmf':
-            return NMF(n_components=n_topics, **model_args)
-        case 'lsa':
-            return TruncatedSVD(n_components=n_topics, **model_args)
-        case _:
-            raise ValueError(
-                "Parameter 'model' only supports str value: 'lda', 'nmf', "
-                "'lsa'"
-            )
-
-
-def model_topics(
-        doc_term_matrix,
-        n_topics: int,
-        model: Literal['lda', 'nmf', 'lsa'] | Any = 'lda',
-        **model_args
-):
-    model = _get_topic_models(model, n_topics, model_args)
-    doc_topic_matrix = model.fit_transform(doc_term_matrix)
-
-    return model, doc_topic_matrix
-
-
-# ===================== Results =====================================
-
 def print_topics(model, vectoriser, n_words):
     terms = vectoriser.get_feature_names_out()
     
     for i, topic in enumerate(model.components_):
         print(f'Top {n_words} words for topic #{i}:')
-        print([terms[i] for i in topic.argsort()[-n_words:]])
+        print([terms[i] for i in topic.argsort()[-n_words:]][::-1])
         print('\n')
 
 
@@ -454,8 +337,8 @@ def graph_topic_terms_matrix(
     #total_freq = sum(frequencies)
     #percentages = [(i / total_freq) for i in frequencies]
 
-    fig, ax = plt.subplots(figsize=(20, 3))
-    ax.bar([vocab[i] for i in top_terms], frequencies)
+    fig, ax = plt.subplots(figsize=(15, 6))
+    ax.bar([vocab[i] for i in top_terms][::-1], frequencies[::-1])
     ax.set_ylabel("Term Weighting")
     fig.autofmt_xdate(rotation=90, ha='right')  # Tilt the x labels
     ax.set_title(f"Term Probability Distribution For Topic {topic_idx}")
@@ -480,17 +363,20 @@ if __name__ == "__main__":
         ]
     )
 
-    df = load_twitter_csv("../../Dataset/twitter.csv", do_preprocess=False)
-    df = preprocess_df(df, stop_words=default_stopwords)
+    df = load_twitter_csv("./dataset/twitter.csv", do_preprocess=False)
+    preprocess_df(df, stop_words=default_stopwords, inplace=True)
 
     corpus = df['tweet']
     #corpus = ['dog and cat are antagonistic', 'dog and dog dislike chocolate',
     #        'chocolate is bad for cat as well', 'dog dislike cat',
     #        'cat dislike dog', 'dog dislike cat too']
 
-    vect, doc_term = vectorise_text(corpus, 'tfidf', min_df=30, max_df=0.95)
+    vect = CountVectorizer(min_df=30, max_df=0.95)
+    doc_term = vect.fit_transform(corpus)
 
-    model, model_matrix = model_topics(doc_term, 7, max_iter=10, model='nmf')
+    model = NMF(n_components=7, max_iter=20)
+    model_matrix = model.fit_transform(doc_term)
+    
     print_topics(model, vect, 15)
 
     plot_document_matrix(model_matrix, decomposer='pca')
