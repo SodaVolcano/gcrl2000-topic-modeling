@@ -3,7 +3,7 @@ Contains NLP functions with a focus on topic modelling of tweets
 """
 
 # Native imports
-from typing import Iterable, Literal, Any
+from typing import Literal, Any
 import re       # Regex matching
 import string   # For string.punctuations
 
@@ -17,10 +17,8 @@ from nltk.corpus import stopwords
 import pandas as pd   # For csv data storage and manipulation
 import numpy as np
 
-from sklearn.feature_extraction.text import CountVectorizer,TfidfVectorizer,\
-    HashingVectorizer
-from sklearn.decomposition import LatentDirichletAllocation, PCA, \
-    NMF, TruncatedSVD
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.decomposition import PCA, LatentDirichletAllocation
 from sklearn.manifold import TSNE
 
 import matplotlib.pyplot as plt  # For visualisation
@@ -346,14 +344,14 @@ def graph_topic_terms_matrix(
 
 # ======================== Testing Ground =============================
 
-if __name__ == "__main__":
+def main():
     resources = ['corpora/stopwords', 'corpora/wordnet',
                 'taggers/averaged_perceptron_tagger']
 
+    print("Checking installation of nltk resources...")
     check_nltk_resources(resources)
 
     default_stopwords = stopwords.words('english')
-
     default_stopwords.extend(
         list(string.punctuation) + [
             'would', 'could', 'get', 'want', 'he', 'twitter', 'elon', 'musk',
@@ -363,34 +361,31 @@ if __name__ == "__main__":
         ]
     )
 
-    df = load_twitter_csv("./dataset/twitter.csv", do_preprocess=False)
+    file = "./dataset/twitter.csv"
+    print(f"Loading dataset from {file}...")
+    df = load_twitter_csv(file, do_preprocess=False)
+    
+    print("Preprocessing the textual data...")
     preprocess_df(df, stop_words=default_stopwords, inplace=True)
 
     corpus = df['tweet']
-    #corpus = ['dog and cat are antagonistic', 'dog and dog dislike chocolate',
-    #        'chocolate is bad for cat as well', 'dog dislike cat',
-    #        'cat dislike dog', 'dog dislike cat too']
 
+    print("Vectorising the textual data using bag-of-words with min_df=30, "
+          "max_df=0.95...")
     vect = CountVectorizer(min_df=30, max_df=0.95)
     doc_term = vect.fit_transform(corpus)
 
-    model = NMF(n_components=7, max_iter=20)
+    print("Training LDA model on the vectorised data with n_components=7, "
+          "max_iter=50")
+    model = LatentDirichletAllocation(n_components=7, max_iter=50)
     model_matrix = model.fit_transform(doc_term)
     
     print_topics(model, vect, 15)
 
+    print("Plotting resulting document matrix using PCA...")
     plot_document_matrix(model_matrix, decomposer='pca')
     plt.show()
 
 
-"""
-VERY IMPORTANT
-    term_matrix is of shape (n_documents, n_terms)
-PCA is reducing matrix by n_terms, NOT n_documents
-    So n_documents stays the SAME, but n_terms REDUCE
-
-Plot visualisation:
-    Dots = document
-    axis (PC) = words weight
-    
-"""
+if __name__ == "__main__":
+    main()
